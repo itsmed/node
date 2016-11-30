@@ -64,7 +64,7 @@ std::string MapToString(const std::map<std::string, std::string> object) {
     json << name_value.second << "\"";
     first = false;
   }
-  json << "\n} ]";
+  json << "\n} ]\n\n";
   return json.str();
 }
 
@@ -89,23 +89,30 @@ void OnBufferAlloc(uv_handle_t* handle, size_t len, uv_buf_t* buf) {
   buf->len = len;
 }
 
-void SendHttpResponse(InspectorSocket* socket, const std::string& response) {
+void SendHttpResponse(InspectorSocket* socket, const char* response,
+                      size_t size) {
   const char HEADERS[] = "HTTP/1.0 200 OK\r\n"
                          "Content-Type: application/json; charset=UTF-8\r\n"
                          "Cache-Control: no-cache\r\n"
                          "Content-Length: %zu\r\n"
                          "\r\n";
   char header[sizeof(HEADERS) + 20];
-  int header_len = snprintf(header, sizeof(header), HEADERS, response.size());
+  int header_len = snprintf(header, sizeof(header), HEADERS, size);
   inspector_write(socket, header, header_len);
-  inspector_write(socket, response.data(), response.size());
+  inspector_write(socket, response, size);
+}
+
+void SendHttpResponse(InspectorSocket* socket, const std::string& response) {
+  SendHttpResponse(socket, response.data(), response.size());
 }
 
 void SendVersionResponse(InspectorSocket* socket) {
-  std::map<std::string, std::string> response;
-  response["Browser"] = "node.js/" NODE_VERSION;
-  response["Protocol-Version"] = "1.1";
-  SendHttpResponse(socket, MapToString(response));
+  static const char response[] =
+      "{\n"
+      "  \"Browser\": \"node.js/" NODE_VERSION "\",\n"
+      "  \"Protocol-Version\": \"1.1\"\n"
+      "}\n";
+  SendHttpResponse(socket, response, sizeof(response) - 1);
 }
 
 std::string GetProcessTitle() {
@@ -250,7 +257,7 @@ class AgentImpl {
   void WaitForFrontendMessage();
   void NotifyMessageReceived();
   State ToState(State state);
-  void SendTargentsListResponse(InspectorSocket* socket);
+  void SendListResponse(InspectorSocket* socket);
   bool RespondToGet(InspectorSocket* socket, const std::string& path);
 
   uv_sem_t start_sem_;
@@ -677,7 +684,7 @@ void AgentImpl::OnRemoteDataIO(InspectorSocket* socket,
   }
 }
 
-void AgentImpl::SendTargentsListResponse(InspectorSocket* socket) {
+void AgentImpl::SendListResponse(InspectorSocket* socket) {
   std::map<std::string, std::string> response;
   response["description"] = "node.js instance";
   response["faviconUrl"] = "https://nodejs.org/static/favicon.ico";
@@ -710,7 +717,7 @@ bool AgentImpl::RespondToGet(InspectorSocket* socket, const std::string& path) {
     return false;
 
   if (match_path_segment(command, "list") || command[0] == '\0') {
-    SendTargentsListResponse(socket);
+    SendListResponse(socket);
     return true;
   } else if (match_path_segment(command, "protocol")) {
     SendProtocolJson(socket);
